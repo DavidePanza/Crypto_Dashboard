@@ -1,0 +1,26 @@
+# .github/workflows/crypto-tracker.yml
+name: Crypto Tracker
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install prefect boto3 requests 
+      - name: Run flow with Prefect Cloud
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }} 
+          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }} 
+        run: python src/crypto_scraper.py

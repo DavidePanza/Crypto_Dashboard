@@ -1,3 +1,4 @@
 .env
 terraform/*
 !terraform/main.tf
+.DS_Store
