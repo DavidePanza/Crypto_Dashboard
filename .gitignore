@@ -2,4 +2,3 @@
 terraform/*
 !terraform/main.tf
 .DS_Store
-dashboard/*.py
