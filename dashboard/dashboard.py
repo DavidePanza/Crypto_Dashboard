@@ -1,14 +1,13 @@
 from dash import Dash, html, dcc, Input, Output
-import plotly.graph_objs as go
 import pandas as pd
-from datetime import datetime, timedelta, date
+import plotly.graph_objs as go
 from plotly.subplots import make_subplots
-import math
 import boto3
 from boto3.dynamodb.conditions import Key
-import pandas as pd
+from datetime import datetime, timedelta, date
 from io import StringIO
 import os
+import math
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,8 +51,8 @@ CRYPTO_COLORS = {
     'tether': '#26A17B',         # Green
     'binancecoin': '#F3BA2F',    # Yellow/Gold
     'solana': '#14F195',         # Bright Green/Cyan
-    'ripple': '#23292F',         # Dark Gray/Black
-    'cardano': '#0033AD',        # Blue
+    'ripple': "#EB28F2",         # Dark Gray/Black
+    'cardano': "#0045E7",        # Blue
     'dogecoin': '#C2A633',       # Gold/Yellow
     'tron': '#FF060A',           # Red
     'usd-coin': '#2775CA',       # Blue
@@ -336,11 +335,19 @@ def update_chart(stored_data, selected_cryptos, plot_mode):
         n_cols = 2
         n_rows = math.ceil(n_cryptos / n_cols)
         
+        # Fixed pixel spacing
+        plot_height = 250  # Height per subplot
+        gap = 120  # Fixed gap between rows
+        total_height = (plot_height * n_rows) + (gap * (n_rows - 1)) + 150  # +150 for margins
+        
+        # Calculate spacing as fraction of total height
+        v_spacing = gap / total_height if n_rows > 1 else 0.1
+        
         fig = make_subplots(
             rows=n_rows,
             cols=n_cols,
             subplot_titles=[crypto.capitalize() for crypto in selected_cryptos],
-            vertical_spacing=0.12,
+            vertical_spacing=v_spacing,
             horizontal_spacing=0.1
         )
         
@@ -373,8 +380,9 @@ def update_chart(stored_data, selected_cryptos, plot_mode):
             template='plotly_dark',
             paper_bgcolor='#1E1E1E',
             plot_bgcolor='#2D2D2D',
-            height=350 * n_rows,
-            title='Cryptocurrency Prices (Separated)'
+            height=total_height,
+            title='Cryptocurrency Prices (Separated)',
+            margin=dict(t=100, b=50, l=50, r=50)  # Fixed margins
         )
         
         return fig
@@ -408,7 +416,3 @@ app.index_string = '''
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-# def run_dash():
-#     app.run(debug=False, port=8050, use_reloader=False)
-
