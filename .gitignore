@@ -1,4 +1,5 @@
 .env
+keys/*
 dashboard/sandbox_dashboard.ipynb
 terraform/*
 !terraform/main.tf
