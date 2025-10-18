@@ -391,17 +391,6 @@ def query_database(start_date, end_date):
     return data_json
 
 
-# Update chart display
-@app.callback(
-    Output('chart', 'figure'),
-    [Input('crypto-data-store', 'data'),
-     Input('crypto-selector', 'value'),
-     Input('plot-mode', 'value')]
-)
-def chart_callback(stored_data, selected_cryptos, plot_mode):
-    return update_chart(stored_data, selected_cryptos, plot_mode)
-
-
 # Search news
 @app.callback(
     [Output('news-data-store', 'data'),
@@ -519,6 +508,18 @@ def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_
     except Exception as e:
         return None, html.Div(f"❌ Error: {str(e)}", 
                               style={'color': '#FF6B6B', 'marginTop': '10px', 'fontSize': '12px'})
+
+
+# Update chart display with news events
+@app.callback(
+    Output('chart', 'figure'),
+    [Input('crypto-data-store', 'data'),
+     Input('news-data-store', 'data'),
+     Input('crypto-selector', 'value'),
+     Input('plot-mode', 'value')]
+)
+def chart_callback(stored_crypto_data, stored_news_data, selected_cryptos, plot_mode):
+    return update_chart(stored_crypto_data, stored_news_data, selected_cryptos, plot_mode)
 
 
 app.index_string = '''
