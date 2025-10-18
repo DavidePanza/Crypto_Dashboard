@@ -1,6 +1,10 @@
 .env
 keys/*
-dashboard/sandbox_dashboard.ipynb
+# dashboard/sandbox_dashboard.ipynb
 terraform/*
 !terraform/main.tf
 .DS_Store
+*jpg
+*png
+dashboard/images/*
+dashboard/process_images.ipynb
