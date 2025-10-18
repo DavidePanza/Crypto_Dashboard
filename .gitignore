@@ -8,3 +8,4 @@ terraform/*
 *png
 dashboard/images/*
 dashboard/process_images.ipynb
+__pycache__

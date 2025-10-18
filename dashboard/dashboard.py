@@ -1,13 +1,15 @@
-from dash import Dash, html, dcc, Input, Output
+from dash import Dash, html, dcc, Input, Output, State
 import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import boto3
 from boto3.dynamodb.conditions import Key
+import requests
 from datetime import datetime, timedelta, date
 from io import StringIO
 import os
 import math
+from callbacks import update_chart
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -45,20 +47,6 @@ def get_data(table, time1, time2):
 
 app = Dash(__name__)
 
-CRYPTO_COLORS = {
-    'bitcoin': '#F7931A',        # Orange
-    'ethereum': '#627EEA',       # Blue/Purple
-    'tether': '#26A17B',         # Green
-    'binancecoin': '#F3BA2F',    # Yellow/Gold
-    'solana': '#14F195',         # Bright Green/Cyan
-    'ripple': "#EB28F2",         # Dark Gray/Black
-    'cardano': "#0045E7",        # Blue
-    'dogecoin': '#C2A633',       # Gold/Yellow
-    'tron': '#FF060A',           # Red
-    'usd-coin': '#2775CA',       # Blue
-}
-
-
 app.layout = html.Div([
     # Header with gradient background
     html.Div([
@@ -81,6 +69,7 @@ app.layout = html.Div([
     # Main container
     html.Div([
         # Store component
+        dcc.Store(id='news-data-store'),
         dcc.Store(id='crypto-data-store'),
         
         # Left panel - Controls
@@ -135,7 +124,7 @@ app.layout = html.Div([
                         {'label': 'Tron', 'value': 'tron'},
                         {'label': 'USD Coin', 'value': 'usd-coin'},
                     ],
-                    value=['bitcoin', 'ethereum'],
+                    value=['bitcoin'],
                     inline=False,
                     style={'color': '#E0E0E0', 'fontSize': '17px'},
                     labelStyle={'display': 'block', 'marginBottom': '10px', 'cursor': 'pointer'}
@@ -152,6 +141,177 @@ app.layout = html.Div([
 
         # Right panel - Chart
         html.Div([
+
+            # News Section
+            html.Div([
+                # Header
+                html.Div([
+                    html.Span('📰', style={'fontSize': '26px', 'marginRight': '10px'}),
+                    html.Span('News', style={'fontSize': '22px', 'fontWeight': '600'})
+                ], style={'marginBottom': '20px', 'display': 'flex', 'alignItems': 'center'}),
+                
+                # Time Range Section
+                html.Div([
+                    html.Label('Time Range:', style={'color': '#B0B0B0', 'fontSize': '15px', 'marginBottom': '10px', 'display': 'block'}),
+                    
+                    # Toggle: Use crypto timerange or custom
+                    dcc.RadioItems(
+                        id='news-timerange-toggle',
+                        options=[
+                            {'label': ' Use Crypto Time Range', 'value': 'crypto'},
+                            {'label': ' Custom Time Range', 'value': 'custom'}
+                        ],
+                        value='crypto',
+                        inline=True,
+                        style={'color': '#E0E0E0', 'fontSize': '14px', 'marginBottom': '10px'},
+                        labelStyle={'marginRight': '20px', 'cursor': 'pointer'}
+                    ),
+                    
+                    # Custom date picker (shown only when custom is selected)
+                    html.Div([
+                        dcc.DatePickerRange(
+                            id='news-date-range',
+                            start_date='2025-10-13',
+                            end_date='2025-10-16',
+                            display_format='YYYY-MM-DD',
+                            style={'marginTop': '10px'},
+                            className='dark-datepicker'
+                        )
+                    ], id='news-date-picker-container'),
+                    
+                ], style={'marginBottom': '15px'}),
+
+                # Person selector
+                html.Div([
+                    html.Label('Choose People:', style={'color': '#B0B0B0', 'fontSize': '15px', 'marginRight': '15px', 'minWidth': '150px'}),
+                    dcc.Dropdown(
+                        id='news-personality-preset',
+                        options=[
+                            {'label': 'Donald Trump', 'value': 'Trump'},
+                            {'label': 'Elon Musk', 'value': 'Musk'},
+                            {'label': 'Vladimir Putin', 'value': 'Putin'},
+                            {'label': 'Christine Lagarde', 'value': 'Lagarde'},
+                        ],
+                        placeholder='Select personalities...',
+                        multi=True,
+                        style={'width': '300px', 'marginRight': '15px'},
+                        className='dark-dropdown'
+                    ),
+                    html.Span('or', style={'color': '#B0B0B0', 'fontSize': '14px', 'marginRight': '15px'}),
+                    dcc.Input(
+                        id='news-personality-custom',
+                        type='text',
+                        placeholder='To be implemented...', #'Enter names (comma-separated)...',
+                        style={
+                            'width': '300px',
+                            'padding': '8px 12px',
+                            'backgroundColor': '#2D2D2D',
+                            'border': '1px solid #444',
+                            'borderRadius': '4px',
+                            'color': '#E0E0E0',
+                            'fontSize': '14px'
+                        }
+                    ),
+                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '15px'}),
+
+                # Keyword selector
+                html.Div([
+                    html.Label('Choose Keywords:', style={'color': '#B0B0B0', 'fontSize': '15px', 'marginRight': '15px', 'minWidth': '150px'}),
+                    dcc.Dropdown(
+                        id='keyword-preset',
+                        options=[
+                            {'label': 'Cryptocurrency', 'value': 'cryptocurrency'},
+                            {'label': 'Bitcoin', 'value': 'bitcoin'},
+                            {'label': 'Regulation', 'value': 'regulation'},
+                            {'label': 'Market', 'value': 'market'},
+                        ],
+                        placeholder='Select keywords...',
+                        multi=True,
+                        style={'width': '300px', 'marginRight': '15px'},
+                        className='dark-dropdown'
+                    ),
+                    html.Span('or', style={'color': '#B0B0B0', 'fontSize': '14px', 'marginRight': '15px'}),
+                    dcc.Input(
+                        id='keyword-custom',
+                        type='text',
+                        placeholder='Enter keywords (comma-separated)...',
+                        style={
+                            'width': '300px',
+                            'padding': '8px 12px',
+                            'backgroundColor': '#2D2D2D',
+                            'border': '1px solid #444',
+                            'borderRadius': '4px',
+                            'color': '#E0E0E0',
+                            'fontSize': '14px'
+                        }
+                    ),
+                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '15px'}),
+
+                # Source selector
+                html.Div([
+                    html.Label('Choose Sources:', style={'color': '#B0B0B0', 'fontSize': '15px', 'marginRight': '15px', 'minWidth': '150px'}),
+                    dcc.Dropdown(
+                        id='source-preset',
+                        options=[
+                            {'label': 'Wall Street Journal', 'value': 'wsj.com'},
+                            {'label': 'Financial Times', 'value': 'ft.com'},
+                            {'label': 'New York Times', 'value': 'nytimes.com'},
+                            {'label': 'Bloomberg', 'value': 'bloomberg.com'},
+                            {'label': 'CoinDesk', 'value': 'coindesk.com'},
+                        ],
+                        value=['wsj.com', 'ft.com', 'nytimes.com', 'bloomberg.com', 'coindesk.com'],
+                        placeholder='Select sources...',
+                        multi=True,
+                        style={'width': '300px', 'marginRight': '15px'},
+                        className='dark-dropdown'
+                    ),
+                    html.Span('or', style={'color': '#B0B0B0', 'fontSize': '14px', 'marginRight': '15px'}),
+                    dcc.Input(
+                        id='source-custom',
+                        type='text',
+                        placeholder='Enter sources (comma-separated)...',
+                        style={
+                            'width': '300px',
+                            'padding': '8px 12px',
+                            'backgroundColor': '#2D2D2D',
+                            'border': '1px solid #444',
+                            'borderRadius': '4px',
+                            'color': '#E0E0E0',
+                            'fontSize': '14px'
+                        }
+                    ),
+                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '20px'}),
+
+                # Search Button
+                html.Div([
+                    html.Button(
+                        'Search News',
+                        id='search-news-button',
+                        n_clicks=0,
+                        style={
+                            'padding': '12px 40px',
+                            'backgroundColor': '#627EEA',
+                            'color': '#FFFFFF',
+                            'border': 'none',
+                            'borderRadius': '6px',
+                            'fontSize': '15px',
+                            'fontWeight': '600',
+                            'cursor': 'pointer',
+                            'transition': 'background-color 0.3s'
+                        }
+                    )
+                ], style={'display': 'flex', 'justifyContent': 'center', 'marginTop': '10px'}),
+
+                html.Div(id='news-status', style={'textAlign': 'center'}),
+
+            ], style={
+                'padding': '20px',
+                'backgroundColor': '#1E1E1E',
+                'borderRadius': '8px',
+                'marginBottom': '20px',
+                'border': '1px solid #333'
+            }),
+
             # Display mode selector
             html.Div([
                 html.Label('Display Mode:', style={'color': '#B0B0B0', 'fontSize': '15px', 'marginRight': '15px'}),
@@ -235,157 +395,169 @@ def query_database(start_date, end_date):
      Input('crypto-selector', 'value'),
      Input('plot-mode', 'value')]
 )
-def update_chart(stored_data, selected_cryptos, plot_mode):
-    if not stored_data or not selected_cryptos:
-        return {
-            'data': [],
-            'layout': go.Layout(
-                title='Select cryptocurrencies to display',
-                template='plotly_dark',
-                paper_bgcolor='#1E1E1E',
-                plot_bgcolor='#2D2D2D'
-            )
-        }
+def chart_callback(stored_data, selected_cryptos, plot_mode):
+    return update_chart(stored_data, selected_cryptos, plot_mode)
+
+
+
+@app.callback(
+    [Output('news-data-store', 'data'),
+     Output('news-status', 'children')],
+    [Input('search-news-button', 'n_clicks')],
+    [State('news-personality-preset', 'value'),
+     State('news-personality-custom', 'value'),
+     State('keyword-preset', 'value'),
+     State('keyword-custom', 'value'),
+     State('source-preset', 'value'),
+     State('source-custom', 'value')]
+)
+def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_keywords, 
+                preset_sources, custom_sources):
     
-    df = pd.read_json(StringIO(stored_data), orient='split')
+    # Don't run on initial load
+    if not n_clicks:
+        return None, ""
     
-    if plot_mode == 'overlaid':
-        # Overlaid - same Y axis
-        traces = []
-        for crypto in selected_cryptos:
-            if crypto not in df.columns:
-                continue
-            
-            traces.append(go.Scatter(
-                x=df['timestamp'],
-                y=df[crypto],
-                mode='lines+markers',
-                name=crypto.capitalize(),
-                line=dict(color=CRYPTO_COLORS.get(crypto, '#FFFFFF'), width=2.5),
-                marker=dict(size=5)
-            ))
+    try:
+        # Combine preset and custom inputs - SIMPLIFIED
+        people = []
         
-        return {
-            'data': traces,
-            'layout': go.Layout(
-                title='Cryptocurrency Prices',
-                template='plotly_dark',
-                paper_bgcolor='#1E1E1E',
-                plot_bgcolor='#2D2D2D',
-                xaxis={'title': 'Time'},
-                yaxis={'title': 'Price (USD)', 'tickformat': '$,.0f'},
-                hovermode='x unified',
-                height=600
-            )
-        }
-    
-    elif plot_mode == 'multi_y':
-        # Overlaid - multiple Y axes
-        fig = go.Figure()
+        # Add preset selections (multi-select returns list or None)
+        if preset_people:  # Will be a list like ['Trump', 'Musk'] or None
+            people.extend(preset_people)
         
-        for i, crypto in enumerate(selected_cryptos):
-            if crypto not in df.columns:
-                continue
-            
-            yaxis_name = 'y' if i == 0 else f'y{i+1}'
-            
-            fig.add_trace(go.Scatter(
-                x=df['timestamp'],
-                y=df[crypto],
-                mode='lines+markers',
-                name=crypto.capitalize(),
-                line=dict(color=CRYPTO_COLORS.get(crypto, '#FFFFFF'), width=2.5),
-                marker=dict(size=5),
-                yaxis=yaxis_name
-            ))
+        # Add custom text
+        if custom_people and custom_people.strip():
+            custom_list = [name.strip() for name in custom_people.split(',') if name.strip()]
+            people.extend(custom_list)
         
-        # Configure layout with multiple y-axes
-        layout = {
-            'template': 'plotly_dark',
-            'paper_bgcolor': '#1E1E1E',
-            'plot_bgcolor': '#2D2D2D',
-            'xaxis': {'title': 'Time'},
-            'hovermode': 'x unified',
-            'height': 600,
-            'title': 'Cryptocurrency Prices'
-        }
+        # Same for keywords
+        keywords = []
+        if preset_keywords:
+            keywords.extend(preset_keywords)
         
-        for i, crypto in enumerate(selected_cryptos):
-            if crypto not in df.columns:
-                continue
+        if custom_keywords and custom_keywords.strip():
+            custom_list = [kw.strip() for kw in custom_keywords.split(',') if kw.strip()]
+            keywords.extend(custom_list)
+        
+        # Same for sources
+        sources = []
+        if preset_sources:
+            sources.extend(preset_sources)
+        
+        if custom_sources and custom_sources.strip():
+            custom_list = [src.strip() for src in custom_sources.split(',') if src.strip()]
+            sources.extend(custom_list)
+        
+        # Debug print - IMPORTANT
+        print(f"\n{'='*60}")
+        print(f"Raw preset_people: {preset_people} (type: {type(preset_people)})")
+        print(f"Raw custom_people: {custom_people} (type: {type(custom_people)})")
+        print(f"Final People: {people}")
+        print(f"Final Keywords: {keywords}")
+        print(f"Final Sources: {sources}")
+        print(f"{'='*60}\n")
+        
+        # Validation
+        if not people:
+            return None, html.Div("⚠️ Please select at least one person", 
+                                  style={'color': '#FF6B6B', 'marginTop': '10px'})
+        
+        if not keywords:
+            keywords = ["bitcoin"]  # Default keyword
+        
+        if not sources:
+            sources = ["wsj.com", "ft.com", "nytimes.com", "bloomberg.com", "coindesk.com"]
+        
+        # GDELT API setup
+        base_url = "https://api.gdeltproject.org/api/v2/doc/doc"
+        proximity = 15
+        
+        all_news = []
+        
+        # Search for each person SEPARATELY
+        for personality in people:
+            # Build domain filter with OR
+            domain_filters = " OR ".join([f"domainis:{d}" for d in sources])
             
-            if i == 0:
-                layout['yaxis'] = {
-                    'tickformat': '$,.0f',
-                    'showticklabels': False
-                }
+            # Build nearX query: ONE person with MULTIPLE keywords (OR)
+            near_queries = ' OR '.join([f'near{proximity}:"{personality} {kw}"' for kw in keywords])
+            
+            # Combine: only add parentheses if multiple keywords
+            if len(keywords) > 1:
+                full_query = f"({near_queries}) sourcelang:English ({domain_filters})"
             else:
-                layout[f'yaxis{i+1}'] = {
-                    'tickformat': '$,.0f',
-                    'overlaying': 'y',
-                    'showticklabels': False
-                }
+                full_query = f"{near_queries} sourcelang:English ({domain_filters})"
+            
+            # Date parameters
+            params = {
+                "query": full_query,
+                "mode": "artlist",
+                "format": "csv",
+                "startdatetime": "20251013000000",
+                "enddatetime": "20251016235959",
+                "sort": "datedesc",
+                "maxrecords": 250
+            }
+            
+            print(f"\nSearching for: {personality}")
+            print(f"Keywords: {keywords}")
+            print(f"Query: {full_query}")
+            
+            # Make request
+            response = requests.get(base_url, params=params, timeout=30)
+            
+            print(f"Response status: {response.status_code}, length: {len(response.text)}")
+            
+            if response.status_code == 200 and response.text.strip():
+                csv_data = StringIO(response.text)
+                df_person = pd.read_csv(csv_data)
+                
+                if not df_person.empty:
+                    df_person['person'] = personality
+                    all_news.append(df_person)
+                    print(f"✓ Found {len(df_person)} articles for {personality}")
+                else:
+                    print(f"✗ Empty DataFrame for {personality}")
+            else:
+                print(f"✗ No response for {personality}")
         
-        fig.update_layout(layout)
-        return fig
+        # Combine all results
+        if all_news:
+            df_news = pd.concat(all_news, ignore_index=True)
+            
+            # Sort by date
+            if 'seendate' in df_news.columns:
+                df_news = df_news.sort_values('seendate', ascending=False)
+            
+            # Store as JSON
+            news_json = df_news.to_json(orient='split', date_format='iso')
+            
+            # Create status message
+            person_counts = df_news['person'].value_counts().to_dict()
+            breakdown = ", ".join([f"{person}: {count}" for person, count in person_counts.items()])
+            
+            status_msg = html.Div([
+                html.Div([
+                    html.Span("✓ ", style={'color': '#4CAF50', 'fontSize': '18px'}),
+                    html.Span(f"Found {len(df_news)} total articles", 
+                             style={'color': '#4CAF50', 'fontSize': '14px', 'fontWeight': '600'})
+                ]),
+                html.Div(breakdown, 
+                        style={'color': '#B0B0B0', 'fontSize': '12px', 'marginTop': '5px'})
+            ], style={'marginTop': '10px'})
+            
+            return news_json, status_msg
+        else:
+            return None, html.Div("⚠️ No articles found for any person", 
+                                  style={'color': '#FFA726', 'marginTop': '10px'})
     
-    else:  # separated
-        # Separated plots - 2 per row
-        n_cryptos = len(selected_cryptos)
-        n_cols = 2
-        n_rows = math.ceil(n_cryptos / n_cols)
-        
-        # Fixed pixel spacing
-        plot_height = 250  # Height per subplot
-        gap = 120  # Fixed gap between rows
-        total_height = (plot_height * n_rows) + (gap * (n_rows - 1)) + 150  # +150 for margins
-        
-        # Calculate spacing as fraction of total height
-        v_spacing = gap / total_height if n_rows > 1 else 0.1
-        
-        fig = make_subplots(
-            rows=n_rows,
-            cols=n_cols,
-            subplot_titles=[crypto.capitalize() for crypto in selected_cryptos],
-            vertical_spacing=v_spacing,
-            horizontal_spacing=0.1
-        )
-        
-        for i, crypto in enumerate(selected_cryptos):
-            if crypto not in df.columns:
-                continue
-            
-            row = (i // n_cols) + 1
-            col = (i % n_cols) + 1
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=df['timestamp'],
-                    y=df[crypto],
-                    mode='lines+markers',
-                    name=crypto.capitalize(),
-                    line=dict(color=CRYPTO_COLORS.get(crypto, '#FFFFFF'), width=2.5),
-                    marker=dict(size=4),
-                    showlegend=False
-                ),
-                row=row,
-                col=col
-            )
-            
-            fig.update_yaxes(title_text='Price (USD)', row=row, col=col, tickformat='$,.0f')
-        
-        fig.update_xaxes(title_text='Time')
-        
-        fig.update_layout(
-            template='plotly_dark',
-            paper_bgcolor='#1E1E1E',
-            plot_bgcolor='#2D2D2D',
-            height=total_height,
-            title='Cryptocurrency Prices (Separated)',
-            margin=dict(t=100, b=50, l=50, r=50)  # Fixed margins
-        )
-        
-        return fig
+    except Exception as e:
+        print(f"Error in news search: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, html.Div(f"❌ Error: {str(e)}", 
+                              style={'color': '#FF6B6B', 'marginTop': '10px', 'fontSize': '12px'})
 
 
 app.index_string = '''
@@ -400,6 +572,36 @@ app.index_string = '''
         <style>
             * {
                 font-family: 'Montserrat', sans-serif !important;
+            }
+            
+            /* Dark dropdown styling */
+            .dark-dropdown .Select-control {
+                background-color: #2D2D2D !important;
+                border-color: #444 !important;
+            }
+            
+            .dark-dropdown .Select-placeholder,
+            .dark-dropdown .Select-value-label {
+                color: #E0E0E0 !important;
+            }
+            
+            .dark-dropdown .Select-menu-outer {
+                background-color: #2D2D2D !important;
+                border-color: #444 !important;
+            }
+            
+            .dark-dropdown .Select-option {
+                background-color: #2D2D2D !important;
+                color: #E0E0E0 !important;
+            }
+            
+            .dark-dropdown .Select-option:hover,
+            .dark-dropdown .Select-option.is-focused {
+                background-color: #3D3D3D !important;
+            }
+            
+            .dark-dropdown .Select-arrow-zone {
+                color: #E0E0E0 !important;
             }
         </style>
     </head>
