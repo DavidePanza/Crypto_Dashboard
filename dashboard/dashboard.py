@@ -113,8 +113,8 @@ app.layout = html.Div([
                         id='date-picker-range',
                         min_date_allowed=date(2025, 10, 13),
                         max_date_allowed=(datetime.now() - timedelta(hours=1)).date(),
-                        start_date=(datetime.now() - timedelta(days=1)).date(),
-                        end_date=datetime.now().date(),
+                        start_date='2025-10-13',
+                        end_date='2025-10-17',
                         display_format='YYYY-MM-DD',
                     ),
                 ]),
@@ -391,7 +391,6 @@ def query_database(start_date, end_date):
     return data_json
 
 
-# Search news
 @app.callback(
     [Output('news-data-store', 'data'),
      Output('news-status', 'children')],
@@ -450,13 +449,27 @@ def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_
         base_url = "https://api.gdeltproject.org/api/v2/doc/doc"
         proximity = 15
         all_news = []
+        failed_searches = []
+        
+        print(f"\n{'='*80}")
+        print(f"Searching from {news_start} to {news_end}")
+        print(f"People: {people}")
+        print(f"Keywords: {keywords}")
+        print(f"Sources: {sources}")
+        print(f"{'='*80}\n")
         
         # Search for each person separately
         for personality in people:
             domain_filters = " OR ".join([f"domainis:{d}" for d in sources])
+            
+            # Build near queries
             near_queries = ' OR '.join([f'near{proximity}:"{personality} {kw}"' for kw in keywords])
             
-            full_query = f"({near_queries}) sourcelang:English ({domain_filters})" if len(keywords) > 1 else f"{near_queries} sourcelang:English ({domain_filters})"
+            # Fix: Don't wrap single query in parentheses, only wrap if multiple OR conditions
+            if len(keywords) > 1:
+                full_query = f"({near_queries}) sourcelang:English ({domain_filters})"
+            else:
+                full_query = f"{near_queries} sourcelang:English ({domain_filters})"
             
             params = {
                 "query": full_query,
@@ -468,15 +481,58 @@ def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_
                 "maxrecords": 250
             }
             
-            response = requests.get(base_url, params=params, timeout=30)
-            
-            if response.status_code == 200 and response.text.strip():
-                csv_data = StringIO(response.text)
-                df_person = pd.read_csv(csv_data)
+            try:
+                response = requests.get(base_url, params=params, timeout=30)
                 
-                if not df_person.empty:
-                    df_person['person'] = personality
-                    all_news.append(df_person)
+                print(f"Status: {response.status_code}")
+                print(f"Response length: {len(response.text)} chars")
+                
+                if response.status_code == 200:
+                    # Check if we got actual data (not just headers or error)
+                    if len(response.text) < 50:
+                        print(f"✗ Response too short for {personality}")
+                        failed_searches.append(f"{personality} (no results)")
+                        continue
+                    
+                    # Check if response looks like CSV with headers
+                    first_line = response.text.split('\n')[0].lower()
+                    if 'url' not in first_line:
+                        print(f"✗ Invalid CSV format for {personality}")
+                        print(f"First line: {first_line}")
+                        failed_searches.append(f"{personality} (invalid format)")
+                        continue
+                    
+                    # Try to parse CSV
+                    try:
+                        csv_data = StringIO(response.text)
+                        df_person = pd.read_csv(csv_data, on_bad_lines='skip')
+                        
+                        if df_person.empty:
+                            print(f"✗ Empty results for {personality}")
+                            failed_searches.append(f"{personality} (0 articles)")
+                        else:
+                            df_person['person'] = personality
+                            all_news.append(df_person)
+                            print(f"✓ Found {len(df_person)} articles for {personality}")
+                            
+                    except pd.errors.EmptyDataError:
+                        print(f"✗ Empty CSV data for {personality}")
+                        failed_searches.append(f"{personality} (empty data)")
+                    except Exception as parse_error:
+                        print(f"✗ CSV parse error for {personality}: {str(parse_error)}")
+                        failed_searches.append(f"{personality} (parse error)")
+                else:
+                    print(f"✗ HTTP {response.status_code} for {personality}")
+                    failed_searches.append(f"{personality} (HTTP {response.status_code})")
+                        
+            except requests.exceptions.Timeout:
+                print(f"✗ Timeout for {personality}")
+                failed_searches.append(f"{personality} (timeout)")
+            except Exception as e:
+                print(f"✗ Exception for {personality}: {str(e)}")
+                failed_searches.append(f"{personality} (error)")
+                import traceback
+                traceback.print_exc()
         
         # Combine results
         if all_news:
@@ -490,7 +546,8 @@ def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_
             person_counts = df_news['person'].value_counts().to_dict()
             breakdown = ", ".join([f"{person}: {count}" for person, count in person_counts.items()])
             
-            status_msg = html.Div([
+            # Add failed searches to status if any
+            status_parts = [
                 html.Div([
                     html.Span("✓ ", style={'color': '#4CAF50', 'fontSize': '18px'}),
                     html.Span(f"Found {len(df_news)} total articles", 
@@ -498,14 +555,27 @@ def search_news(n_clicks, preset_people, custom_people, preset_keywords, custom_
                 ]),
                 html.Div(breakdown, 
                         style={'color': '#B0B0B0', 'fontSize': '12px', 'marginTop': '5px'})
-            ], style={'marginTop': '10px'})
+            ]
+            
+            if failed_searches:
+                status_parts.append(
+                    html.Div(f"⚠️ No results for: {', '.join(failed_searches)}", 
+                            style={'color': '#FFA726', 'fontSize': '11px', 'marginTop': '5px'})
+                )
+            
+            status_msg = html.Div(status_parts, style={'marginTop': '10px'})
             
             return news_json, status_msg
         else:
-            return None, html.Div("⚠️ No articles found", 
+            # All searches failed
+            fail_msg = f"No articles found. Failed searches: {', '.join(failed_searches)}"
+            return None, html.Div(f"⚠️ {fail_msg}", 
                                   style={'color': '#FFA726', 'marginTop': '10px'})
     
     except Exception as e:
+        print(f"\n❌ Error in news search: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None, html.Div(f"❌ Error: {str(e)}", 
                               style={'color': '#FF6B6B', 'marginTop': '10px', 'fontSize': '12px'})
 

@@ -5,6 +5,7 @@ import math
 from config import CRYPTO_COLORS
 from utils import load_dataframe_from_store, create_empty_figure, img_to_base64
 
+
 # Load images
 IMAGE_PATHS = {
     'trump': img_to_base64('./images/round/trump.png'),
@@ -12,6 +13,7 @@ IMAGE_PATHS = {
     'putin': img_to_base64('./images/round/putin.png'),
     'lagarde': img_to_base64('./images/round/lagarde.png'),
 }
+
 
 def update_chart(stored_crypto_data, stored_news_data, selected_cryptos, plot_mode):
     """Main chart update callback logic"""
@@ -33,15 +35,16 @@ def update_chart(stored_crypto_data, stored_news_data, selected_cryptos, plot_mo
         return create_separated_charts(df, selected_cryptos)
     
 
-def add_news_overlays(fig, df, df_news, selected_cryptos):
-    """Add news event images and markers to the chart"""
+def add_news_overlays_single_y(fig, df, df_news, selected_cryptos):
+    """Add news event images and markers for single Y-axis charts"""
     if df_news is None or df_news.empty:
         return
     
     # Calculate y position for images (above the chart)
     y_min = float(df[selected_cryptos].min().min())
     y_max = float(df[selected_cryptos].max().max())
-    image_y = y_max + (y_max - y_min) * 0.05
+    y_range = y_max - y_min
+    image_y = y_max + y_range * 0.15
     
     # Ensure timestamp column exists in news data
     if 'seendate' in df_news.columns:
@@ -55,9 +58,9 @@ def add_news_overlays(fig, df, df_news, selected_cryptos):
     if df_crypto['timestamp'].dt.tz is None:
         df_crypto['timestamp'] = df_crypto['timestamp'].dt.tz_localize('UTC')
     
-    # Calculate image width
+    # Calculate image width (as fraction of time range)
     time_range = (df_crypto['timestamp'].max() - df_crypto['timestamp'].min()).total_seconds() * 1000
-    image_width = time_range * 0.02  # 2% of time range
+    image_width = time_range * 0.015  # 1.5% of time range
     
     # Add each news image as overlay
     for i, row in df_news.iterrows():
@@ -69,7 +72,10 @@ def add_news_overlays(fig, df, df_news, selected_cryptos):
         
         # Get the person's image
         person_key = row['person'].lower()
-        image_source = IMAGE_PATHS.get(person_key, IMAGE_PATHS['trump'])
+        image_source = IMAGE_PATHS.get(person_key, IMAGE_PATHS.get('trump'))
+        
+        if image_source is None:
+            continue
         
         # Add image
         fig.add_layout_image(
@@ -80,7 +86,7 @@ def add_news_overlays(fig, df, df_news, selected_cryptos):
                 xref="x",
                 yref="y",
                 sizex=image_width,
-                sizey=(y_max - y_min) * 0.1,
+                sizey=y_range * 0.08,
                 xanchor="center",
                 yanchor="middle",
                 layer="above"
@@ -100,9 +106,9 @@ def add_news_overlays(fig, df, df_news, selected_cryptos):
             # Add dashed line from image to price
             fig.add_trace(go.Scatter(
                 x=[date, date],
-                y=[image_y, crypto_price],
+                y=[image_y - y_range * 0.04, crypto_price],
                 mode='lines',
-                line=dict(color='white', width=1, dash='dash'),
+                line=dict(color='rgba(255,255,255,0.5)', width=1, dash='dash'),
                 showlegend=False,
                 hoverinfo='skip'
             ))
@@ -113,25 +119,164 @@ def add_news_overlays(fig, df, df_news, selected_cryptos):
                 y=[crypto_price],
                 mode='markers',
                 marker=dict(
-                    size=8,
+                    size=10,
                     color=CRYPTO_COLORS.get(crypto, '#FFFFFF'),
                     line=dict(color='white', width=2)
                 ),
                 showlegend=False,
-                hovertext=f"{crypto}: ${crypto_price:.2f}<br>{row.get('title', 'News Event')}",
+                hovertext=f"{crypto.capitalize()}: ${crypto_price:.2f}<br>{row.get('title', row.get('Title', 'News Event'))}",
                 hoverinfo='text'
             ))
     
     # Add invisible scatter for hover on images
+    news_dates = pd.to_datetime(df_news['Date'])
+    if news_dates.dt.tz is None:
+        news_dates = news_dates.dt.tz_localize('UTC')
+    
     fig.add_trace(go.Scatter(
-        x=pd.to_datetime(df_news['Date']).dt.tz_localize('UTC') if pd.to_datetime(df_news['Date']).dt.tz is None else pd.to_datetime(df_news['Date']),
+        x=news_dates,
         y=[image_y] * len(df_news),
         mode='markers',
-        marker=dict(size=50, opacity=0),
+        marker=dict(size=60, opacity=0),
         hovertext=df_news.get('title', df_news.get('Title', 'News Event')),
         hoverinfo='text',
         name='News Events',
         showlegend=False
+    ))
+
+
+def add_news_overlays_multi_y(fig, df, df_news, selected_cryptos):
+    """Add news event images and markers for multi Y-axis charts"""
+    if df_news is None or df_news.empty:
+        return
+    
+    # Calculate individual y ranges for each crypto
+    crypto_ranges = {}
+    for crypto in selected_cryptos:
+        if crypto in df.columns:
+            crypto_ranges[crypto] = {
+                'min': float(df[crypto].min()),
+                'max': float(df[crypto].max()),
+                'range': float(df[crypto].max() - df[crypto].min())
+            }
+    
+    # Use the first crypto's range for image positioning
+    first_crypto = selected_cryptos[0]
+    if first_crypto not in crypto_ranges:
+        return
+    
+    y_max = crypto_ranges[first_crypto]['max']
+    y_range = crypto_ranges[first_crypto]['range']
+    image_y = y_max + y_range * 0.15
+    
+    # Ensure timestamp column exists in news data
+    if 'seendate' in df_news.columns:
+        df_news['Date'] = pd.to_datetime(df_news['seendate'], format='%Y%m%dT%H%M%SZ')
+    elif 'Date' not in df_news.columns:
+        return
+    
+    # Make crypto timestamps timezone-aware
+    df_crypto = df.copy()
+    df_crypto['timestamp'] = pd.to_datetime(df_crypto['timestamp'])
+    if df_crypto['timestamp'].dt.tz is None:
+        df_crypto['timestamp'] = df_crypto['timestamp'].dt.tz_localize('UTC')
+    
+    # Calculate image width
+    time_range = (df_crypto['timestamp'].max() - df_crypto['timestamp'].min()).total_seconds() * 1000
+    image_width = time_range * 0.015
+    
+    # Add each news image as overlay
+    for i, row in df_news.iterrows():
+        date = pd.to_datetime(row['Date'])
+        
+        if date.tz is None:
+            date = date.tz_localize('UTC')
+        
+        person_key = row['person'].lower()
+        image_source = IMAGE_PATHS.get(person_key, IMAGE_PATHS.get('trump'))
+        
+        if image_source is None:
+            continue
+        
+        # Add image (positioned relative to first Y-axis)
+        fig.add_layout_image(
+            dict(
+                source=image_source,
+                x=date,
+                y=image_y,
+                xref="x",
+                yref="y",
+                sizex=image_width,
+                sizey=y_range * 0.08,
+                xanchor="center",
+                yanchor="bottom",  # Changed to bottom anchor
+                layer="above"
+            )
+        )
+        
+        # Find closest timestamp
+        closest_idx = (df_crypto['timestamp'] - date).abs().idxmin()
+        
+        # Collect all y-values for this date to draw a single line
+        line_x = [date]
+        line_y = [image_y]
+        
+        # Add markers for each crypto on its respective Y-axis
+        for j, crypto in enumerate(selected_cryptos):
+            if crypto not in df.columns or crypto not in crypto_ranges:
+                continue
+            
+            crypto_price = df.loc[closest_idx, crypto]
+            yaxis_ref = 'y' if j == 0 else f'y{j+1}'
+            
+            # Add point at intersection
+            fig.add_trace(go.Scatter(
+                x=[date],
+                y=[crypto_price],
+                mode='markers',
+                marker=dict(
+                    size=10,
+                    color=CRYPTO_COLORS.get(crypto, '#FFFFFF'),
+                    line=dict(color='white', width=2)
+                ),
+                showlegend=False,
+                hovertext=f"{crypto.capitalize()}: ${crypto_price:.2f}<br>{row.get('title', row.get('Title', 'News Event'))}",
+                hoverinfo='text',
+                yaxis=yaxis_ref
+            ))
+            
+            # For the first crypto, add a single dashed line from image to price
+            if j == 0:
+                line_x.append(date)
+                line_y.append(crypto_price)
+        
+        # Add single dashed line (only for first crypto to avoid overlaps)
+        if len(line_y) > 1:
+            fig.add_trace(go.Scatter(
+                x=line_x,
+                y=line_y,
+                mode='lines',
+                line=dict(color='rgba(255,255,255,0.5)', width=1, dash='dash'),
+                showlegend=False,
+                hoverinfo='skip',
+                yaxis='y'
+            ))
+    
+    # Add invisible scatter for hover on images
+    news_dates = pd.to_datetime(df_news['Date'])
+    if news_dates.dt.tz is None:
+        news_dates = news_dates.dt.tz_localize('UTC')
+    
+    fig.add_trace(go.Scatter(
+        x=news_dates,
+        y=[image_y] * len(df_news),
+        mode='markers',
+        marker=dict(size=60, opacity=0),
+        hovertext=df_news.get('title', df_news.get('Title', 'News Event')),
+        hoverinfo='text',
+        name='News Events',
+        showlegend=False,
+        yaxis='y'
     ))
 
 
@@ -151,10 +296,6 @@ def create_overlaid_chart(df, selected_cryptos, df_news=None):
             line=dict(color=CRYPTO_COLORS.get(crypto, '#FFFFFF'), width=2.5),
             marker=dict(size=5)
         ))
-    
-    # Add news overlays if available
-    if df_news is not None and not df_news.empty:
-        add_news_overlays(fig, df, df_news, selected_cryptos)
     
     # Set initial view to last 24 hours
     latest_date = pd.to_datetime(df['timestamp']).max()
@@ -188,6 +329,10 @@ def create_overlaid_chart(df, selected_cryptos, df_news=None):
         height=600
     )
     
+    # Add news overlays AFTER layout is set
+    if df_news is not None and not df_news.empty:
+        add_news_overlays_single_y(fig, df, df_news, selected_cryptos)
+    
     return fig
 
 
@@ -210,10 +355,6 @@ def create_multi_y_chart(df, selected_cryptos, df_news=None):
             marker=dict(size=5),
             yaxis=yaxis_name
         ))
-    
-    # Add news overlays if available
-    if df_news is not None and not df_news.empty:
-        add_news_overlays(fig, df, df_news, selected_cryptos)
     
     layout = {
         'template': 'plotly_dark',
@@ -239,6 +380,11 @@ def create_multi_y_chart(df, selected_cryptos, df_news=None):
             }
     
     fig.update_layout(layout)
+    
+    # Add news overlays AFTER layout is set
+    if df_news is not None and not df_news.empty:
+        add_news_overlays_multi_y(fig, df, df_news, selected_cryptos)
+    
     return fig
 
 
