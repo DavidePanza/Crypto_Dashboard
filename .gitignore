@@ -7,5 +7,6 @@ terraform/*
 *jpg
 *png
 dashboard/images/*
+dashboard/callbacks_old.py
 dashboard/process_images.ipynb
 __pycache__
